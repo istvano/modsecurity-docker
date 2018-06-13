@@ -4,6 +4,8 @@ LABEL maintainer="Istvan Orban <istvan.orban@gmail.com>"
 
 # Install Prereqs
 ENV DEBIAN_FRONTEND noninteractive
+ENV NGINX_VERSION 1.13.9
+
 RUN apt-get update -qq && \
     apt install  -qq -y --no-install-recommends --no-install-suggests \
     ca-certificates      \
@@ -34,6 +36,23 @@ RUN cd /opt && \
     make install
 
 RUN strip /usr/local/modsecurity/bin/* /usr/local/modsecurity/lib/*.a /usr/local/modsecurity/lib/*.so*
+
+FROM debian:stretch-slim  AS owaspmodsecurity-build
+RUN apt update && \
+    apt-get install --no-install-recommends --no-install-suggests -y \
+    ca-certificates \
+    tar \
+    curl
+RUN apt clean && \
+    rm -rf /var/lib/apt/lists/
+ENV CRS_VERSION 3.0.2
+RUN cd /opt && \
+    curl -OL https://github.com/SpiderLabs/owasp-modsecurity-crs/archive/v${CRS_VERSION}.tar.gz && \
+    tar --strip-components 1 -xzf v${CRS_VERSION}.tar.gz owasp-modsecurity-crs-${CRS_VERSION}/rules owasp-modsecurity-crs-${CRS_VERSION}/crs-setup.conf.example && \
+    rm v${CRS_VERSION}.tar.gz && \
+    mv crs-setup.conf.example crs-setup.conf && \
+    mv rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf.example rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf && \
+    mv rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf.example rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf
 
 FROM debian:stretch-slim AS nginx-build
 
@@ -140,10 +159,12 @@ RUN touch /var/log/nginx/error.log
 
 RUN sed -i '38i modsecurity on;\n\tmodsecurity_rules_file /etc/nginx/modsecurity.d/include.conf;' /etc/nginx/nginx.conf
 RUN mkdir -p /etc/nginx/modsecurity.d
-RUN echo "include /etc/nginx/modsecurity.d/modsecurity.conf" > /etc/nginx/modsecurity.d/include.conf
 COPY --from=modsecurity-build /opt/ModSecurity/modsecurity.conf-recommended /etc/nginx/modsecurity.d
 RUN cd /etc/nginx/modsecurity.d && \
     mv modsecurity.conf-recommended modsecurity.conf
+COPY --from=owaspmodsecurity-build /opt/rules /etc/nginx/modsecurity.d/owasp-crs/rules
+COPY --from=owaspmodsecurity-build /opt/crs-setup.conf /etc/nginx/modsecurity.d/owasp-crs
+COPY include.conf /etc/nginx/modsecurity.d/include.conf
 
 EXPOSE 80
 STOPSIGNAL SIGTERM

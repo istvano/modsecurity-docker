@@ -28,6 +28,10 @@ SHELL=/bin/bash
 .PHONY: pre-build docker-build post-build build release patch-release minor-release major-release tag check-status check-release showver \
 	push pre-push do-push post-push
 
+help: ## this help screen
+		@echo "Use the following commands"
+	    @fgrep -h "##" $(MAKEFILE_LIST) | fgrep -v fgrep | sed -e 's/\\$$//' | sed -e 's/##//'
+
 build: pre-build docker-build post-build
 
 pre-build:
@@ -43,7 +47,7 @@ post-push:
 
 
 
-docker-build: .release
+docker-build: .release ##build docker container
 	docker build $(DOCKER_BUILD_ARGS) -t $(IMAGE):$(VERSION) .
 	@DOCKER_MAJOR=$(shell docker -v | sed -e 's/.*version //' -e 's/,.*//' | cut -d\. -f1) ; \
 	DOCKER_MINOR=$(shell docker -v | sed -e 's/.*version //' -e 's/,.*//' | cut -d\. -f2) ; \
@@ -55,23 +59,26 @@ docker-build: .release
 		docker tag $(IMAGE):$(VERSION) $(IMAGE):latest ; \
 	fi
 
-.release:
+.release: ##create release file
 	@echo "release=0.0.0" > .release
 	@echo "tag=$(NAME)-0.0.0" >> .release
 	@echo INFO: .release created
 	@cat .release
 
 
-release: check-status check-release build push
+release: check-status check-release build push ##release image
 
+run: .release
+	@echo "Running..."
+	docker run -ti --rm -p 80:80 $(IMAGE):latest
 
-push: pre-push do-push post-push 
+push: pre-push do-push post-push ##push docker image to registry
 
 do-push: 
 	docker push $(IMAGE):$(VERSION)
 	docker push $(IMAGE):latest
 
-snapshot: build push
+snapshot: build push ##create snapshot
 
 showver: .release
 	@. $(RELEASE_SUPPORT); getVersion
@@ -85,13 +92,13 @@ tag-minor-release: .release tag
 tag-major-release: VERSION := $(shell . $(RELEASE_SUPPORT); nextMajorLevel)
 tag-major-release: .release tag 
 
-patch-release: tag-patch-release release
+patch-release: tag-patch-release release ##path release
 	@echo $(VERSION)
 
-minor-release: tag-minor-release release
+minor-release: tag-minor-release release ##minor release 
 	@echo $(VERSION)
 
-major-release: tag-major-release release
+major-release: tag-major-release release ##major release
 	@echo $(VERSION)
 
 
@@ -104,9 +111,9 @@ tag: check-status
 	git tag $(TAG) ;
 	@ if [ -n "$(shell git remote -v)" ] ; then git push --tags ; else echo 'no remote to push tags to' ; fi
 
-check-status:
+check-status: ##check status
 	@. $(RELEASE_SUPPORT) ; ! hasChanges || (echo "ERROR: there are still outstanding changes" >&2 && exit 1) ;
 
-check-release: .release
+check-release: .release ##check release
 	@. $(RELEASE_SUPPORT) ; tagExists $(TAG) || (echo "ERROR: version not yet tagged in git. make [minor,major,patch]-release." >&2 && exit 1) ;
 	@. $(RELEASE_SUPPORT) ; ! differsFromRelease $(TAG) || (echo "ERROR: current directory differs from tagged $(TAG). make [minor,major,patch]-release." ; exit 1)
